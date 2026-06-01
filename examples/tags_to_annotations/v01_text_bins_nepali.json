@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "Nepali-calibrated bin edges for metadata_to_text.py",
+    "Derived from typical Nepali TTS dataset statistics (OpenSLR-43, OpenSLR-54).",
+    "Key differences from English v02_bin_edges.json:",
+    "  - speaking_rate: Nepali syllable rate is ~4-6 syllables/sec vs English phoneme rate ~10-14/sec.",
+    "    Bins are tightened around a lower centre point.",
+    "  - pitch: Nepali female speakers tend toward higher pitch; male slightly lower than English average.",
+    "    Adjust thresholds accordingly.",
+    "  - SNR / c50 / sdr bins are audio-quality metrics and are language-agnostic — kept same as upstream.",
+    "",
+    "HOW TO RECALIBRATE ON YOUR OWN DATA:",
+    "  Run scripts/compute_bin_edges_nepali.py (provided separately) on your annotated dataset",
+    "  to recompute percentile-based edges from the actual distribution. Replace the values below.",
+    "",
+    "FORMAT: each key maps to a list of N-1 thresholds that define N bins.",
+    "The text label arrays in v01_text_bins_nepali.json must have exactly N entries per key."
+  ],
+  "speaking_rate": [3.5, 4.5, 5.2, 5.9, 6.6, 7.5],
+  "noise": [-22, -18, -15, -12, -8, -5],
+  "reverberation": [15, 25, 35, 45, 55, 65],
+  "speech_monotony": [0.06, 0.09, 0.12, 0.16, 0.21, 0.28],
+  "utterance_pitch_mean_male": [85, 100, 115, 130, 155, 185],
+  "utterance_pitch_mean_female": [160, 185, 210, 235, 265, 300],
+  "utterance_pitch_std": [8, 14, 20, 28, 38, 52],
+  "sdr": [-5, 5, 12, 18, 24, 30],
+  "pesq": [1.2, 1.6, 2.0, 2.5, 3.0, 3.5],
+  "stoi": [0.4, 0.55, 0.65, 0.75, 0.85, 0.92]
+}
