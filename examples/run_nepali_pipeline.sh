@@ -47,7 +47,7 @@ fi
 echo "[Step 1] Annotating acoustic features..."
 python main_nepali.py "${DATASET_NAME}" \
     --configuration "default" \
-    --text_column_name "transcription" \
+    --text_column_name "text" \
     --audio_column_name "audio" \
     --cpu_num_workers "${CPU_WORKERS}" \
     --rename_column \

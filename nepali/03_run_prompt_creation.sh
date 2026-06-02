@@ -3,7 +3,7 @@
 cd ../../  # run from dataspeech root
 
 python ./scripts/run_prompt_creation.py \
-  --speaker_name "Sita" \
+  --speaker_name "Didi" \
   --is_single_speaker \
   --dataset_name "Titung/nepali-tts-tags" \
   --output_dir "./tmp_nepali" \
