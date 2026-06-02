@@ -1,21 +1,3 @@
-"""
-scripts/compute_bin_edges_nepali.py
-====================================
-Run this ONCE on your annotated Nepali dataset (after running main_nepali.py)
-to compute dataset-specific percentile bin edges and overwrite
-examples/tags_to_annotations/v01_bin_edges_nepali.json.
-
-Usage:
-    python scripts/compute_bin_edges_nepali.py \
-        "YOUR_HF_HANDLE/nepali-tts-tags" \
-        --configuration "default" \
-        --output_path "./examples/tags_to_annotations/v01_bin_edges_nepali.json" \
-        --n_bins 7
-
-The script mirrors how the upstream metadata_to_text.py computes bins (percentile
-histogram on each continuous variable) but writes them out for manual inspection
-and future reuse without recomputation.
-"""
 
 import argparse
 import json

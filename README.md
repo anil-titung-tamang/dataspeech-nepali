@@ -1,384 +1,420 @@
-# Data-Speech
+# Data-Speech — Nepali Fork
 
-Data-Speech is a suite of utility scripts designed to tag speech datasets. 
+**`dataspeech-nepali`** is a Nepali-adapted version of [HuggingFace's Data-Speech](https://github.com/huggingface/dataspeech).
 
-Its aim is to provide a simple, clean codebase for applying audio transformations (or annotations) that may be requested as part of the development of speech-based AI models, such as text-to-speech engines.
+It replaces the English `g2p` phonemizer with an `espeak-ng` Nepali backend (with a pure-Python Devanagari syllable-count fallback), adds Nepali-language LLM prompt templates, and ships a new script to compute dataset-calibrated bin edges from your own Nepali speech data.
 
-Its primary use is to reproduce the annotation method from Dan Lyth and Simon King's research paper [Natural language guidance of high-fidelity text-to-speech with synthetic annotations](https://arxiv.org/abs/2402.01912), that labels various speaker characteristics with natural language descriptions.
+Everything else — GPU enrichments (pitch, SNR, reverberation, squim), `metadata_to_text.py`, the TGI inference path — is unchanged from upstream, so this fork is a drop-in replacement for any Nepali TTS pipeline.
 
-Applying these tools allows us to prepare and release tagged versions of [LibriTTS-R](https://huggingface.co/datasets/parler-tts/libritts-r-filtered-speaker-descriptions), and of [the English version of MLS](https://huggingface.co/datasets/parler-tts/mls-eng-speaker-descriptions).
+Its primary use is to reproduce the annotation method from Dan Lyth and Simon King's research paper [Natural language guidance of high-fidelity text-to-speech with synthetic annotations](https://arxiv.org/abs/2402.01912), and to prepare Nepali datasets for fine-tuning [Parler-TTS](https://github.com/huggingface/parler-tts).
 
-This repository is designed to accompany the [Parler-TTS library](https://github.com/huggingface/parler-tts), which contains the inference and training code for Parler-TTS, a new family of high-quality text-to-speech models.
-
----------
+---
 
 ## 📖 Quick Index
-* [Requirements](#set-up)
-* [Annotating datasets to fine-tune Parler-TTS](#annotating-datasets-to-fine-tune-parler-tts)
-* [Annotating datasets from scratch](#annotating-datasets-from-scratch)
-* [Using Data-Speech to filter your speech datasets](#using-data-speech-to-filter-your-speech-datasets)
-* [❓ FAQ](#faq)
-* [Logs](#logs)
 
+- [What's different from upstream](#whats-different-from-upstream)
+- [Requirements](#set-up)
+- [Annotating a Nepali dataset to fine-tune Parler-TTS](#annotating-a-nepali-dataset-to-fine-tune-parler-tts)
+- [Annotating Nepali datasets from scratch](#annotating-nepali-datasets-from-scratch)
+- [Using Data-Speech to filter your speech datasets](#using-data-speech-to-filter-your-speech-datasets)
+- [❓ FAQ](#faq)
+- [Logs](#logs)
+
+---
+
+## What's different from upstream
+
+### New files
+
+| File | Purpose |
+|---|---|
+| `main_nepali.py` | Nepali entry point (default `--text_column_name transcription`, adds `--language ne` flag, Nepali-labelled print output) |
+| `scripts/run_prompt_creation_nepali.py` | Prompt creation with **Nepali-language LLM prompts** and a `--prompt_language` switch (`ne` / `en`) |
+| `scripts/compute_bin_edges_nepali.py` | Computes percentile bin edges from **your actual Nepali data** instead of reusing English LibriTTS-R defaults |
+| `examples/tags_to_annotations/v01_text_bins_nepali.json` | Nepali keyword label vocabulary (Devanagari) |
+| `examples/tags_to_annotations/v01_bin_edges_nepali.json` | Starter Nepali bin edges (derived from OpenSLR-43/54 statistics; replace with your own via `compute_bin_edges_nepali.py`) |
+| `examples/run_nepali_pipeline.sh` | Full end-to-end shell script for the four-step Nepali pipeline |
+| `nepali/01_run_annotation.sh` | Step 1 helper |
+| `nepali/02_run_metadata_to_text.sh` | Step 3 helper |
+| `nepali/03_run_prompt_creation.sh` | Step 4 helper |
+
+### Modified files
+
+**`dataspeech/cpu_enrichments/rate.py`** — the core change.
+
+The upstream version depends on the English `g2p` library:
+```python
+from g2p import make_g2p
+transducer = make_g2p('eng', 'eng-ipa')
+phonemes = transducer(text).output_string
+```
+
+This fork replaces it with a two-tier Nepali phonemizer (same public `rate_apply()` API, so all downstream scripts work unchanged):
+
+1. **`espeak-ng` via subprocess** — calls `espeak-ng -v ne --ipa` for accurate Nepali IPA. Used when `espeak-ng` is installed.
+2. **Devanagari syllable counter** — pure Python fallback; counts syllable nuclei from Devanagari Unicode ranges. Zero extra dependencies, no crash if `espeak-ng` is absent.
+
+**`main_nepali.py`** (separate file, `main.py` untouched):
+- Default `--text_column_name` changed from `"text"` → `"transcription"` (standard in Nepali TTS datasets)
+- Added `--language ne` flag
+- Print statements prefixed with `[Nepali]` for clarity
+
+**Why Nepali needs its own bin edges:** Nepali syllable rate (~4–6 syllables/sec) is much lower than the English phoneme rate (~10–14/sec) that the upstream LibriTTS-R bins were calibrated on. Using the English bins would collapse all Nepali utterances into the bottom 1–2 speed categories. Pitch distributions also differ. `compute_bin_edges_nepali.py` recomputes percentile-based edges from your actual data.
+
+---
 
 ## Set-up
 
-You first need to clone this repository before installing requirements.
-
 ```sh
-git clone git@github.com:huggingface/dataspeech.git
+git clone https://github.com/anil-titung-tamang/dataspeech-nepali.git dataspeech
 cd dataspeech
 pip install -r requirements.txt
+
+# Install espeak-ng with Nepali voice data (recommended for accurate speaking rate)
+sudo apt-get install -y espeak-ng espeak-ng-data
+
+# Verify Nepali voice is available
+espeak-ng --voices | grep " ne "
+# If not found, the pipeline falls back to Devanagari syllable counting automatically.
 ```
 
-## Annotating datasets to fine-tune Parler-TTS
+---
 
-In the following examples, we'll load 30 hours of audio data from the [Jenny TTS dataset](https://github.com/dioco-group/jenny-tts-dataset), a high-quality mono-speaker TTS dataset, from an Irish female speaker named Jenny.
+## Annotating a Nepali dataset to fine-tune Parler-TTS
 
-The aim here is to create an annotated version of Jenny TTS, in order to fine-tune the [Parler-TTS v1 checkpoint](https://huggingface.co/parler-tts/parler-tts-mini-v1) on this dataset.
+In the following examples we annotate a Nepali single-speaker TTS dataset in order to fine-tune [Parler-TTS Mini v1](https://huggingface.co/parler-tts/parler-tts-mini-v1).
 
-Thanks to a [script similar to what's described in the FAQ](#how-do-i-use-datasets-that-i-have-with-this-repository), we've uploaded the dataset to the HuggingFace hub, under the name [reach-vb/jenny_tts_dataset](https://huggingface.co/datasets/reach-vb/jenny_tts_dataset).
+The pipeline has four steps:
+1. Annotate the dataset with continuous acoustic variables
+2. Compute Nepali-calibrated bin edges from your data
+3. Map continuous annotations to Nepali text keyword bins
+4. Generate Nepali natural-language descriptions with an LLM
 
-Feel free to follow the link above to listen to some samples of the Jenny TTS dataset thanks to the hub viewer.
+> **Dataset note:** Your dataset must be on the HuggingFace Hub with at least an `audio` column and a `transcription` column. See the [FAQ](#how-do-i-upload-a-local-nepali-dataset-to-the-hub) if you have local files.
 
-> [!IMPORTANT]
-> Refer to the section [Annotating datasets from scratch](#annotating-datasets-from-scratch) for more detailed explanations of what's going on under-the-hood.
+### Step 1 — Annotate acoustic features
 
-We'll:
-1. Annotate the Jenny dataset with continuous variables that measures the speech characteristics
-2. Map those annotations to text bins that characterize the speech characteristics.
-3. Create natural language descriptions from those text bins
-
-### 1. Annotate the Jenny dataset
-
-We'll use [`main.py`](main.py) to get the following continuous variables:
-    - Speaking rate `(nb_phonemes / utterance_length)`
-    - Scale-Invariant Signal-to-Distortion Ratio (SI-SDR) 
-    - Reverberation
-    - Speech monotony
+`main_nepali.py` computes speaking rate (using the Nepali phonemizer), pitch, SNR, reverberation, and optionally SI-SDR/PESQ/STOI.
 
 ```sh
-python main.py "reach-vb/jenny_tts_dataset" \
+python main_nepali.py "YOUR_HF_HANDLE/nepali-tts-dataset" \
   --configuration "default" \
   --text_column_name "transcription" \
   --audio_column_name "audio" \
-  --cpu_num_workers 8 \
+  --cpu_num_workers 4 \
+  --num_workers_per_gpu_for_pitch 2 \
   --rename_column \
-  --repo_id "jenny-tts-tags-v1" \
+  --repo_id "YOUR_HF_HANDLE/nepali-tts-tags" \
   --apply_squim_quality_estimation
 ```
 
-Note that the script will be faster if you have GPUs at your disposal. It will automatically scale-up to every GPUs available in your environnement.
+The script scales automatically to every GPU available. The resulting dataset is pushed to `YOUR_HF_HANDLE/nepali-tts-tags` on the HuggingFace Hub with new columns: `speaking_rate`, `phonemes`, `utterance_pitch_mean`, `utterance_pitch_std`, `snr`, `c50`, `si-sdr`, `pesq`, `stoi`.
 
-The resulting dataset will be pushed to the HuggingFace hub under your HuggingFace handle. Mine was pushed to [ylacombe/jenny-tts-tags-v1](https://huggingface.co/datasets/ylacombe/jenny-tts-tags-v1).
+### Step 2 — Compute Nepali-calibrated bin edges
 
-### 2. Map annotations to text bins
-
-Since the ultimate goal here is to fine-tune the [Parler-TTS v1 checkpoint](https://huggingface.co/parler-tts/parler-tts-mini-v1) on the Jenny dataset, we want to stay consistent with the text bins of the datasets on which the latter model was trained.
-
-This is easy to do thanks to the following command:
+Run this **once** on your annotated dataset to produce percentile-based bin edges calibrated to your actual speech distribution. This is important because Nepali speaking rates and pitch ranges differ substantially from the English LibriTTS-R data that the upstream default bins were derived from.
 
 ```sh
-python ./scripts/metadata_to_text.py \
-    "ylacombe/jenny-tts-tags-v1" \
-    --repo_id "jenny-tts-tags-v1" \
+python scripts/compute_bin_edges_nepali.py "YOUR_HF_HANDLE/nepali-tts-tags" \
+  --configuration "default" \
+  --split "train" \
+  --output_path "./examples/tags_to_annotations/v01_bin_edges_nepali.json" \
+  --n_bins 7 \
+  --cpu_num_workers 4
+```
+
+This overwrites `examples/tags_to_annotations/v01_bin_edges_nepali.json` with edges computed from your data. A starter file with hand-tuned defaults (derived from OpenSLR-43/54 statistics) is already provided if you want to skip this step.
+
+### Step 3 — Map continuous tags to Nepali text keyword bins
+
+```sh
+python ./scripts/metadata_to_text.py "YOUR_HF_HANDLE/nepali-tts-tags" \
+    --repo_id "YOUR_HF_HANDLE/nepali-tts-tags" \
     --configuration "default" \
-    --cpu_num_workers "8" \
-    --path_to_bin_edges "./examples/tags_to_annotations/v02_bin_edges.json" \
-    --path_to_text_bins "./examples/tags_to_annotations/v02_text_bins.json" \
+    --cpu_num_workers 4 \
+    --leading_split_for_bins "train" \
+    --path_to_bin_edges "./examples/tags_to_annotations/v01_bin_edges_nepali.json" \
+    --path_to_text_bins "./examples/tags_to_annotations/v01_text_bins_nepali.json" \
     --avoid_pitch_computation \
     --apply_squim_quality_estimation
 ```
 
-Thanks to [`v02_bin_edges.json`](/examples/tags_to_annotations/v02_bin_edges.json), we don't need to recompute bins from scratch and the above script takes a few seconds.
+This adds Nepali keyword label columns such as `speaking_rate`, `noise`, `reverberation`, `speech_monotony`. The Nepali keyword vocabulary used is (from `v01_text_bins_nepali.json`):
 
-The resulting dataset will be pushed to the HuggingFace hub under your HuggingFace handle. Mine was push to [ylacombe/jenny-tts-tags-v1](https://huggingface.co/datasets/ylacombe/jenny-tts-tags-v1).
+| Feature | Nepali labels (slowest/quietest/lowest → fastest/loudest/highest) |
+|---|---|
+| Speaking rate | धेरै बिस्तारै, बिस्तारै, अलिकति बिस्तारै, मध्यम गति, अलिकति छिटो, छिटो, धेरै छिटो |
+| Noise | अत्यन्त कोलाहलपूर्ण, धेरै कोलाहलपूर्ण, कोलाहलपूर्ण, अलिकति कोलाहलपूर्ण, लगभग शान्त, धेरै स्पष्ट |
+| Reverberation | धेरै टाढाको आवाज, टाढाको आवाज, अलिकति टाढाको आवाज, अलिकति नजिकको आवाज, धेरै नजिकको आवाज |
+| Speech monotony | धेरै एकरस, एकरस, अलिकति भावपूर्ण र सजिव, भावपूर्ण र सजिव, धेरै भावपूर्ण र सजिव |
+| Pitch | धेरै कम पिच, कम पिच, अलिकति कम पिच, मध्यम पिच, अलिकति उच्च पिच, उच्च पिच, धेरै उच्च पिच |
 
-You can notice that text bins such as `slightly slowly`, `very monotone` have been added to the samples.
+### Step 4 — Generate Nepali natural-language descriptions
 
-### 3. Create natural language descriptions from those text bins
+`run_prompt_creation_nepali.py` sends Nepali-language prompts to an LLM, producing a `text_description` column in Devanagari. This is the conditioning input Parler-TTS will be trained on.
 
-Now that we have text bins associated to the Jenny dataset, the next step is to create natural language descriptions out of the few created features.
-
-Here, we decided to create prompts that use the name `Jenny`, prompts that'll look like the following:
-`In a very expressive voice, Jenny pronounces her words incredibly slowly. There's some background noise in this room with a bit of echo.'`
-
-This step generally demands more resources and times and should use one or many GPUs.
-
-[`run_prompt_creation_jenny.sh`](examples/prompt_creation/run_prompt_creation_jenny.sh) indicates how to run it on the Jenny dataset:
+Pass `--is_single_speaker` and `--speaker_name` for a named single-speaker dataset:
 
 ```sh
-python ./scripts/run_prompt_creation.py \
-  --speaker_name "Jenny" \
+python ./scripts/run_prompt_creation_nepali.py \
+  --speaker_name "Sunita" \
   --is_single_speaker \
   --is_new_speaker_prompt \
-  --dataset_name "ylacombe/jenny-tts-tags-v1" \
+  --prompt_language "ne" \
+  --dataset_name "YOUR_HF_HANDLE/nepali-tts-tags" \
   --dataset_config_name "default" \
-  --model_name_or_path "mistralai/Mistral-7B-Instruct-v0.2" \
-  --per_device_eval_batch_size 128 \
+  --model_name_or_path "google/gemma-2-2b-it" \
+  --per_device_eval_batch_size 16 \
   --attn_implementation "sdpa" \
-  --output_dir "./tmp_jenny" \
+  --output_dir "./tmp_nepali_prompts" \
   --load_in_4bit \
   --push_to_hub \
-  --hub_dataset_id "jenny-tts-tagged-v1" \
-  --preprocessing_num_workers 24 \
-  --dataloader_num_workers 24
+  --hub_dataset_id "YOUR_HF_HANDLE/nepali-tts-tagged" \
+  --preprocessing_num_workers 4 \
+  --dataloader_num_workers 4
 ```
 
-As usual, we precise the dataset name and configuration we want to annotate. `model_name_or_path` should point to a `transformers` model for prompt annotation. You can find a list of such models [here](https://huggingface.co/models?pipeline_tag=text-generation&library=transformers&sort=trending). Here, we used a version of Mistral's 7B model.
+**`--model_name_or_path`** must point to a model with strong Devanagari support. Recommended options:
 
-> [!NOTE]
-> If you want to use this on a multi-speaker dataset, you'll have to adapt the logic of the script. First, you need to remove the `--is_single_speaker` and `--speaker_name "Jenny"` flags.
-> 
-> Then, there's two cases:
-> 1. In case you want to associate names to some speakers, you need to pass the speaker id column name, and a JSON file which maps the speaker ids to these names. For example, `--speaker_id_column "speaker_id" --speaker_ids_to_name_json ./examples/prompt_creation/speaker_ids_to_names.json`. Feel free to take a look at [speaker_ids_to_names.json](examples/prompt_creation/speaker_ids_to_names.json) to get inspiration.
-> 2. In case you don't want to associate names to speakers, you don't have to do anything else. 
+| Model | Notes |
+|---|---|
+| `google/gemma-2-2b-it` | Fits on T4 (4-bit), Apache 2.0 |
+| `google/gemma-2-9b-it` | Better quality, needs A100/L4 |
+| `Qwen/Qwen2.5-3B-Instruct` | Strong Nepali/Hindi, smaller footprint |
+| `Qwen/Qwen2.5-7B-Instruct` | Best quality at manageable size |
 
+**`--prompt_language`**: `ne` (default) generates Nepali Devanagari descriptions. Pass `en` to fall back to the upstream English prompts.
 
-## Annotating datasets from scratch
+The generated descriptions will look like:
+> *सुनिता मध्यम गतिमा र धेरै स्पष्ट आवाजमा बोल्नुहुन्छ। आवाज अलिकति नजिकको छ।*
 
-In the following examples, we'll load 1,000 hours of labelled audio data from the [LibriTTS-R dataset](https://huggingface.co/datasets/blabble-io/libritts_r) and add annotations using the dataspeech library. The resulting dataset is complete with discrete annotation tags, as well as a coherent audio
-description of the spoken audio characteristics.
+For a multi-speaker Nepali dataset, remove `--is_single_speaker` and `--speaker_name`. To associate specific names to speaker IDs, pass `--speaker_id_column "speaker_id" --speaker_ids_to_name_json ./examples/prompt_creation/speaker_ids_to_names.json`.
 
-
-There are 3 steps to be completed in order to generate annotations:
-1. [Annotate the speech dataset](#predict-annotations) to get the following continuous variables:
-    - Speaking rate `(nb_phonemes / utterance_length)`
-    - Scale-Invariant Signal-to-Distortion Ratio (SI-SDR) 
-    - Reverberation
-    - Speech monotony
-2. [Map the previous annotations categorical to discrete keywords bins](#map-continuous-annotations-to-key-words)
-3. [Create natural language descriptions from a set of keywords](#generate-natural-language-descriptions)
-
-
-### 1. Predict annotations
-
-For the time being, [`main.py`](main.py) can be used to generate speaking rate, SNR, reverberation, PESQ, SI-SDR and pitch estimation. 
-
-To use it, you need a dataset from the [datasets](https://huggingface.co/docs/datasets/v2.17.0/en/index) library, either locally or on the [hub](https://huggingface.co/datasets).
-
+### Running the full pipeline in one go
 
 ```sh
-python main.py "blabble-io/libritts_r" \
-  --configuration "dev" \
-  --output_dir ./tmp_libritts_r_dev/ \
-  --text_column_name "text_normalized" \
+# Edit HF_HANDLE, DATASET_NAME, and LLM_MODEL at the top of the script
+bash examples/run_nepali_pipeline.sh
+```
+
+---
+
+## Annotating Nepali datasets from scratch
+
+The following section explains the steps in more detail for users who want to understand what's happening under the hood, or who want to apply the pipeline to a large multi-speaker Nepali corpus.
+
+There are four steps:
+1. Annotate the speech dataset with continuous acoustic variables
+2. Compute Nepali-calibrated bin edges from your data
+3. Map continuous annotations to Nepali text keyword bins
+4. Generate Nepali natural-language descriptions
+
+### Step 1 — Predict annotations
+
+`main_nepali.py` generates speaking rate, SNR, reverberation, PESQ, SI-SDR, and pitch for every utterance. Speaking rate is computed as `len(phonemes) / utterance_duration`, where `phonemes` comes from the Nepali phonemizer (espeak-ng → Devanagari syllable fallback).
+
+```sh
+python main_nepali.py "YOUR_HF_HANDLE/nepali-tts-dataset" \
+  --configuration "default" \
+  --output_dir ./tmp_nepali/ \
+  --text_column_name "transcription" \
   --audio_column_name "audio" \
-  --cpu_num_workers 8 \
+  --cpu_num_workers 4 \
   --rename_column \
   --apply_squim_quality_estimation
 ```
 
-Here, we've used 8 processes for operations that don't use GPUs, namely to compute the speaking rate. If GPUs were present in the environnement, the operations that can be computed on GPUs - namely pitch, SNR and reverberation estimation - will use every GPUs available in the environnement.
+New columns added to the dataset:
 
-You can learn more about the arguments you can pass to `main.py` by passing:
+| Column | Description |
+|---|---|
+| `speaking_rate` | Nepali phonemes (or syllables) per second |
+| `phonemes` | Phoneme/syllable string used to compute speaking rate |
+| `utterance_pitch_mean` | Mean pitch (Hz) |
+| `utterance_pitch_std` | Pitch standard deviation |
+| `snr` | Speech-to-noise ratio |
+| `c50` | Reverberation (C50) |
+| `si-sdr` | Scale-Invariant SDR (proxy noise measure) |
+| `pesq` | Perceptual speech quality |
+| `stoi` | Short-time objective intelligibility |
+
+Use `python main_nepali.py --help` to see all available arguments.
+
+### Step 2 — Compute Nepali-calibrated bin edges
+
+Unlike the upstream English pipeline, you should not reuse the LibriTTS-R bin edges for Nepali. Run `compute_bin_edges_nepali.py` once on your annotated data:
 
 ```sh
-python main.py --help
+python scripts/compute_bin_edges_nepali.py "YOUR_HF_HANDLE/nepali-tts-tags" \
+  --configuration "default" \
+  --split "train" \
+  --output_path "./examples/tags_to_annotations/v01_bin_edges_nepali.json" \
+  --n_bins 7
 ```
 
-In [`/examples/tagging/run_main_1k.sh`](/examples/tagging/run_main_1k.sh), we scaled up the initial command line to the whole dataset. Note that we've used the `repo_id` argument to push the dataset to the hub, resulting in [this dataset](https://huggingface.co/datasets/ylacombe/libritts-r-text-tags-v3).
+The script computes percentile-based edges (trimming 1% extremes on each side, matching upstream methodology) and renames columns to match `metadata_to_text.py` expectations (`snr` → `noise`, `c50` → `reverberation`, `si-sdr` → `sdr`).
 
-The dataset viewer gives an idea of what has been done, namely:
-- new columns were added:
-    - `utterance_pitch_std`: Gives a measure of the standard deviation of pitch in the utterance.
-    - `utterance_pitch_mean`: Gives a measure of average pitch in the utterance.
-    - `snr`: Speech-to-noise ratio
-    - `c50`: Reverberation estimation
-    - `speaking_rate`
-    - `phonemes`: which was used to compute the speaking rate
-    - `pesq` and `si-sdr`: which measure intelligibility and a proxy of noise, as indicated [here](https://pytorch.org/audio/main/tutorials/squim_tutorial.html)
-- the audio column was removed - this is especially useful when dealing with big datasets, as writing and pushing audio data can become a bottleneck.
+If you don't have data yet, a starter `v01_bin_edges_nepali.json` is included with hand-tuned defaults based on OpenSLR-43/54 statistics.
 
-![image](https://github.com/ylacombe/dataspeech/assets/52246514/f422a728-f2af-4c8f-bf2a-65c6722bc0c6)
-
-
-### 2. Map continuous annotations to key-words
-
-The next step is to map the continuous annotations from the previous steps to key-words. To do so, continous annotations are mapped to categorical bins that are then associated to key-words. For example, the speaking rate can be associated to 7 text bins which are: `"very slowly", "quite slowly", "slightly slowly", "moderate speed", "slightly fast", "quite fast", "very fast"`.
-
-[`scripts/metadata_to_text.py`](/scripts/metadata_to_text.py) computes bins on aggregated statistics from multiple datasets:
-- A speaker's pitch is calculated by averaging the pitches across its voice clips. The computed pitch estimator is then compared to speakers of the same gender to derive the pitch keyword of the speaker(very high-pitched to very low-pitched).
-- The rest of the keywords are derived by [computing histograms](https://numpy.org/doc/stable/reference/generated/numpy.histogram.html) of the continuous variables over all training samples, from which the extreme values have been eliminated, and associating a keyword with each bin.
+### Step 3 — Map continuous annotations to Nepali text keyword bins
 
 ```sh
-python ./scripts/metadata_to_text.py "ylacombe/libritts-r-text-tags-v3+ylacombe/libritts-r-text-tags-v3" \
---configuration "clean+other" \
---output_dir "./tmp_tts_clean+./tmp_tts_other" \
---cpu_num_workers "8" \
---leading_split_for_bins "train" \
---plot_directory "./plots/" \
---path_to_text_bins "./examples/tags_to_annotations/v02_text_bins.json" \
---apply_squim_quality_estimation \
-```
-Note how we've been able to pass different datasets with different configurations by separating the relevant arguments with `"+"`.
-
-By passing `--repo_id parler-tts/libritts-r-tags-and-text+parler-tts/libritts-r-tags-and-text`, we pushed the resulting dataset to [this hub repository](https://huggingface.co/datasets/parler-tts/libritts-r-tags-and-text).
-
-Note that this step is a bit more subtle than the previous one, as we generally want to collect a wide variety of speech data to compute accurate key-words. 
-
-Indeed, some datasets, such as LibriTTS-R, collect data from only one or a few sources; for LibriTTS-R, these are audiobooks, and the process of collecting or processing the data can result in homogeneous data that has little variation. In the case of LibriTTS-R, the data has been cleaned to have little noise, little reverberation, and the audiobooks collected leaves little variety in intonation.
-
-You can learn more about the arguments you can pass to `main.py` by passing:
-
-```sh
-python main.py --help
+python ./scripts/metadata_to_text.py "YOUR_HF_HANDLE/nepali-tts-tags" \
+  --repo_id "YOUR_HF_HANDLE/nepali-tts-tags" \
+  --configuration "default" \
+  --cpu_num_workers 4 \
+  --leading_split_for_bins "train" \
+  --path_to_bin_edges "./examples/tags_to_annotations/v01_bin_edges_nepali.json" \
+  --path_to_text_bins "./examples/tags_to_annotations/v01_text_bins_nepali.json" \
+  --avoid_pitch_computation \
+  --apply_squim_quality_estimation
 ```
 
-### 3. Generate natural language descriptions
+You can pass multiple datasets separated by `"+"` just as in the upstream pipeline.
 
-Now that we have text bins associated to our datasets, the next step is to create natural language descriptions. To 
-achieve this, we pass the discrete features to an LLM, and have it generate a natural language description. This step 
-generally demands more resources and times and should use one or many GPUs. It can be performed in one of two ways:
-1. Using the [Accelerate](https://huggingface.co/docs/accelerate/index)-based script, [`scripts/run_prompt_creation.py`](/scripts/run_prompt_creation.py), or
-2. Using the [TGI](https://huggingface.co/docs/text-generation-inference/en/index)-based script, [`scripts/run_prompt_creation_llm_swarm.py`](/scripts/run_prompt_creation_llm_swarm.py)
+### Step 4 — Generate Nepali natural-language descriptions
 
-We recommend you first try the Accelerate script, since it makes no assumptions about the GPU hardware available and is 
-thus easier to run. Should you need faster inference, you can switch to the TGI script, which assumes you have a SLURM 
-cluster with Docker support.
-
-### 3.1 Accelerate Inference
-
-[`scripts/run_prompt_creation.py`](/scripts/run_prompt_creation.py) relies on [`accelerate`](https://huggingface.co/docs/accelerate/index) and [`transformers`](https://huggingface.co/docs/transformers/index) to generate natural language descriptions from LLMs. 
-
-[`examples/prompt_creation/run_prompt_creation_1k.sh`](examples/prompt_creation/run_prompt_creation_1k.sh) indicates how to run it on LibriTTS-R
-with 8 GPUs in half-precision:
+#### 4.1 Accelerate inference (recommended)
 
 ```sh
-accelerate launch --multi_gpu --mixed_precision=fp16 --num_processes=8 run_prompt_creation.py \
-  --dataset_name "parler-tts/libritts-r-tags-and-text" \
-  --dataset_config_name "clean" \
-  --model_name_or_path "meta-llama/Meta-Llama-3-8B-Instruct" \
+python ./scripts/run_prompt_creation_nepali.py \
+  --dataset_name "YOUR_HF_HANDLE/nepali-tts-tags" \
+  --dataset_config_name "default" \
+  --model_name_or_path "google/gemma-2-9b-it" \
   --per_device_eval_batch_size 64 \
   --attn_implementation "sdpa" \
-  --torch_compile \
-  --dataloader_num_workers 4 \
-  --output_dir "./" \
+  --output_dir "./tmp_nepali_prompts" \
   --load_in_4bit \
   --push_to_hub \
-  --hub_dataset_id "parler-tts/libritts-r-tags-and-text-generated" \
+  --hub_dataset_id "YOUR_HF_HANDLE/nepali-tts-tagged" \
   --is_new_speaker_prompt \
+  --prompt_language "ne" \
+  --preprocessing_num_workers 4 \
+  --dataloader_num_workers 4
 ```
 
-As usual, we define the dataset name and configuration we want to annotate. `model_name_or_path` should point to a `transformers` model for prompt annotation. You can find a list of such models [here](https://huggingface.co/models?pipeline_tag=text-generation&library=transformers&sort=trending). Here, we used an instruction-tuned version of Meta's LLaMA-3 8B model. Should you use LLaMA or Gemma, you can enable torch compile with the flag `--torch_compile` for up to 1.5x faster inference.
+For multi-GPU machines:
 
-The folder [`examples/prompt_creation/`](examples/prompt_creation/) contains more examples. 
+```sh
+accelerate launch --multi_gpu --mixed_precision=fp16 --num_processes=4 \
+  scripts/run_prompt_creation_nepali.py \
+  --dataset_name "YOUR_HF_HANDLE/nepali-tts-tags" \
+  --dataset_config_name "default" \
+  --model_name_or_path "google/gemma-2-9b-it" \
+  --per_device_eval_batch_size 64 \
+  --attn_implementation "sdpa" \
+  --output_dir "./tmp_nepali_prompts" \
+  --load_in_4bit \
+  --push_to_hub \
+  --hub_dataset_id "YOUR_HF_HANDLE/nepali-tts-tagged" \
+  --is_new_speaker_prompt \
+  --prompt_language "ne" \
+  --preprocessing_num_workers 8 \
+  --dataloader_num_workers 8
+```
 
-In particular, (`run_prompt_creation_1k_with_speaker_consistency.sh`)[examples/prompt_creation/run_prompt_creation_1k_with_speaker_consistency.sh] adapts the previous example but introduces speaker consistency. Here, "speaker consistency" simply means associating certain speakers with specific names. In this case, all descriptions linked to these speakers will specify their names, rather than generating anonymous descriptions.
+#### 4.2 TGI inference (high-throughput clusters)
 
-
-> [!TIP]
-> Scripts from this library can also be used as a starting point for applying other models to other datasets from the [datasets library](https://huggingface.co/docs/datasets/v2.17.0/en/index) in a large-scale settings.
-> 
-> For example, `scripts/run_prompt_creation.py` can be adapted to perform large-scaled inference using other LLMs and prompts.
-
-### 3.2 TGI Inference
-
-[`scripts/run_prompt_creation_llm_swarm.py`](/scripts/run_prompt_creation_llm_swarm.py) relies on [TGI](https://huggingface.co/docs/text-generation-inference/en/index) 
-and [LLM-Swarm](https://github.com/huggingface/llm-swarm/tree/main) to generate descriptions from an LLM endpoint.
-Compared to the Accelerate script, it uses continuous-batching, which improves throughput by up to 1.5x. It requires one 
-extra dependency, LLM-Swarm:
+The upstream `scripts/run_prompt_creation_llm_swarm.py` can be used unchanged. It relies on [TGI](https://huggingface.co/docs/text-generation-inference/en/index) and [LLM-Swarm](https://github.com/huggingface/llm-swarm):
 
 ```sh
 pip install git+https://github.com/huggingface/llm-swarm.git
-```
 
-[`examples/prompt_creation_llm_swarm/run_prompt_creation_1k.sh`](examples/prompt_creation_llm_swarm/run_prompt_creation_1k.sh) indicates how to run it on LibriTTS-R
-with 1 TGI instance:
-
-```sh
-python run_prompt_creation_llm_swarm.py \
-  --dataset_name "stable-speech/libritts-r-tags-and-text" \
-  --dataset_config_name "clean" \
-  --model_name_or_path "mistralai/Mistral-7B-Instruct-v0.2" \
-  --num_instances "1" \
+python scripts/run_prompt_creation_llm_swarm.py \
+  --dataset_name "YOUR_HF_HANDLE/nepali-tts-tags" \
+  --dataset_config_name "default" \
+  --model_name_or_path "Qwen/Qwen2.5-7B-Instruct" \
+  --num_instances 1 \
   --output_dir "./" \
   --push_to_hub \
-  --hub_dataset_id "parler-tts/libritts-r-tags-and-text-generated"
+  --hub_dataset_id "YOUR_HF_HANDLE/nepali-tts-tagged"
 ```
 
-Note that the script relies on the SLURM file [`examples/prompt_creation_llm_swarm/tgi_h100.template.slurm`](examples/prompt_creation_llm_swarm/tgi_h100.template.slurm),
-which is a template configuration for the Hugging Face H100 cluster. You can update the config based on your cluster.
+Note that this path uses the upstream English prompts. For Nepali output, use the Accelerate path (`run_prompt_creation_nepali.py`) with `--prompt_language ne`.
 
-### To conclude
-
-In the [`/examples`](/examples/) folder, we applied this recipe to both [MLS Eng](https://huggingface.co/datasets/parler-tts/mls-eng-speaker-descriptions) and [LibriTTS-R](https://huggingface.co/datasets/parler-tts/libritts-r-filtered-speaker-descriptions). The resulting datasets were used to train [Parler-TTS](https://github.com/huggingface/parler-tts), a new text-to-speech model.
-
-This recipe is both scalable and easily modifiable and will hopefully help the TTS research community explore new ways of conditionning speech synthesis. 
+---
 
 ## Using Data-Speech to filter your speech datasets
 
-While the rest of the README explains how to use this repository to create text descriptions of speech utterances, Data-Speech can also be used to perform filtering on speech datasets.
+Data-Speech can also be used to filter Nepali datasets on quality or speech characteristics before training. For example:
 
-For example, you can
-1. Use the [`Predict annotations`](#1-predict-annotations) step to predict SNR and reverberation.
-2. Filter your data sets to retain only the most qualitative samples.
+1. Run Step 1 (`main_nepali.py`) to compute SNR, reverberation, and speaking rate.
+2. Filter to retain only samples above an SNR threshold or within a target speaking-rate range.
 
-You could also, to give more examples, filter on a certain pitch level (e.g only low-pitched voices), or a certain speech rate (e.g only fast speech).
+This is useful for cleaning scraped Nepali web audio, removing utterances with high background noise, or building a subset of slow/fast speech for speed-robust TTS training.
+
+---
 
 ## FAQ
 
 ### What kind of datasets do I need?
 
-We rely on the [`datasets`](https://huggingface.co/docs/datasets/v2.17.0/en/index) library, which is optimized for speed and efficiency, and is deeply integrated with the [HuggingFace Hub](https://huggingface.co/datasets) which allows easy sharing and loading.
+A HuggingFace `datasets`-compatible dataset with at least one `audio` column and a `transcription` column (Devanagari text). A `gender` and `speaker_id` column are also needed if you want per-speaker pitch computation. See the [datasets docs](https://huggingface.co/docs/datasets/v2.17.0/en/index) for details.
 
-In order to use this repository, you need a speech dataset from [`datasets`](https://huggingface.co/docs/datasets/v2.17.0/en/index) with at least one audio column and a text transcription column. Additionally, you also need a gender and a speaker id column, especially if you want to compute pitch.
+### How do I upload a local Nepali dataset to the Hub?
 
-### How do I use datasets that I have with this repository?
+If you have a folder of `.wav` files and a `metadata.csv` with columns `file_name` and `transcription`:
 
-If you have a local dataset, and want to create a dataset from [`datasets`](https://huggingface.co/docs/datasets/v2.17.0/en/index) to use Data-Speech, you can use the following recipes or refer to the [`dataset` docs](https://huggingface.co/docs/datasets/v2.17.0/en/index) for more complex use-cases.
-
-1. You first need to create a csv file that contains the **full paths** to the audio. The column name for those audio files could be for example `audio`, but you can use whatever you want. You also need a column with the transcriptions of the audio, this column can be named `transcript` but you can use whatever you want.
-
-2. Once you have this csv file, you can load it to a dataset like this:
 ```python
-from datasets import DatasetDict
+import pandas as pd
+from datasets import Dataset, Audio
 
-dataset = DatasetDict.from_csv({"train": PATH_TO_CSV_FILE})
-```
-3. You then need to convert the audio column name to [`Audio`](https://huggingface.co/docs/datasets/v2.19.0/en/package_reference/main_classes#datasets.Audio) so that `datasets` understand that it deals with audio files.
-```python
-from datasets import Audio
+df = pd.read_csv("/path/to/metadata.csv")
+df["audio"] = df["file_name"].apply(lambda f: f"/path/to/wavs/{f}")
+
+dataset = Dataset.from_pandas(df[["audio", "transcription"]])
 dataset = dataset.cast_column("audio", Audio())
-```
-4. You can then [push the dataset to the hub](https://huggingface.co/docs/datasets/v2.19.0/en/package_reference/main_classes#datasets.DatasetDict.push_to_hub):
-```python
-dataset.push_to_hub(REPO_ID)
+dataset.push_to_hub("YOUR_HF_HANDLE/nepali-tts-dataset")
 ```
 
-Note that you can make the dataset private by passing [`private=True`](https://huggingface.co/docs/datasets/v2.19.0/en/package_reference/main_classes#datasets.DatasetDict.push_to_hub.private) to the [`push_to_hub`](https://huggingface.co/docs/datasets/v2.19.0/en/package_reference/main_classes#datasets.DatasetDict.push_to_hub) method. Find other possible arguments [here](https://huggingface.co/docs/datasets/v2.19.0/en/package_reference/main_classes#datasets.DatasetDict.push_to_hub).
+### Can I use this with an English dataset?
 
-When using Data-Speech, you can then use `REPO_ID` (replace this by the name you want here and above) as the dataset name.
+Yes. Use the original `main.py` and `scripts/run_prompt_creation.py` from this repo (both are unchanged from upstream). Or use `run_prompt_creation_nepali.py` with `--prompt_language en` to get English descriptions from the same script.
+
+### What if `espeak-ng` doesn't have the Nepali voice?
+
+The pipeline falls back silently to pure-Python Devanagari syllable counting. The speaking rate values will be slightly less accurate (syllables rather than IPA phonemes) but the pipeline will complete without errors and the quality difference is generally small for Nepali.
+
+### Why not just use the upstream English bin edges?
+
+Nepali syllable rate (~4–6 syllables/sec) is roughly half the English phoneme rate (~10–14/sec) that the upstream LibriTTS-R bins were derived from. Using English bins would place almost all Nepali utterances in the bottom speed bins, making the keyword labels meaningless. The same issue applies to pitch (Nepali female speakers average higher pitch than English audiobook speakers). `compute_bin_edges_nepali.py` solves this by computing bins from your actual data's percentile distribution.
+
+---
 
 ## Logs
 
+- **[2024]**: Initial Nepali fork
+  - Replaced `g2p` English phonemizer in `rate.py` with `espeak-ng` Nepali backend + Devanagari syllable fallback
+  - Added `main_nepali.py` with Nepali defaults
+  - Added `run_prompt_creation_nepali.py` with full Devanagari prompt templates
+  - Added `compute_bin_edges_nepali.py` for dataset-specific bin calibration
+  - Added `v01_text_bins_nepali.json` and starter `v01_bin_edges_nepali.json`
+  - Added `examples/run_nepali_pipeline.sh` end-to-end pipeline script
 
-* [August 2024]: Updated version of Data-Speech, suited for Parler-TTS v1
-  * New measures: Pesq and SI-SDR, the latter being used for better noise estimation
-  * Improved prompts
-  * Prompt creation can deal with speaker consistency and accents
-* [April 2024]: Release of the first version of Data-Speech 
+- **[August 2024]** (upstream): Updated Data-Speech for Parler-TTS v1
+  - New measures: PESQ and SI-SDR
+  - Improved prompts
+  - Speaker consistency and accent support
 
+- **[April 2024]** (upstream): First release of Data-Speech
+
+---
 
 ## Acknowledgements
 
-This library builds on top of a number of open-source giants, to whom we'd like to extend our warmest thanks for providing these tools!
+This fork builds on [Data-Speech](https://github.com/huggingface/dataspeech) by Yoach Lacombe, Vaibhav Srivastav, and Sanchit Gandhi at HuggingFace.
 
 Special thanks to:
-- Dan Lyth and Simon King, from Stability AI and Edinburgh University respectively, for publishing such a promising and clear research paper: [Natural language guidance of high-fidelity text-to-speech with synthetic annotations](https://arxiv.org/abs/2402.01912).
-- and the many libraries used, namely [datasets](https://huggingface.co/docs/datasets/v2.17.0/en/index), [brouhaha](https://github.com/marianne-m/brouhaha-vad/blob/main/README.md), [penn](https://github.com/interactiveaudiolab/penn/blob/master/README.md), [g2p](https://github.com/Kyubyong/g2p), [accelerate](https://huggingface.co/docs/accelerate/en/index) and [transformers](https://huggingface.co/docs/transformers/index).
+- Dan Lyth and Simon King for [Natural language guidance of high-fidelity text-to-speech with synthetic annotations](https://arxiv.org/abs/2402.01912)
+- The maintainers of [datasets](https://huggingface.co/docs/datasets/v2.17.0/en/index), [brouhaha](https://github.com/marianne-m/brouhaha-vad), [penn](https://github.com/interactiveaudiolab/penn), [espeak-ng](https://github.com/espeak-ng/espeak-ng), [accelerate](https://huggingface.co/docs/accelerate/en/index), and [transformers](https://huggingface.co/docs/transformers/index)
 
 ## Citation
 
-If you found this repository useful, please consider citing this work and also the original Stability AI paper:
-
 ```
 @misc{lacombe-etal-2024-dataspeech,
-  author = {Yoach Lacombe and Vaibhav Srivastav and Sanchit Gandhi},
-  title = {Data-Speech},
-  year = {2024},
-  publisher = {GitHub},
-  journal = {GitHub repository},
+ 
+  title = {Data-Speech-nepali},
+  year = {2026},
   howpublished = {\url{https://github.com/ylacombe/dataspeech}}
 }
 ```
@@ -395,12 +431,13 @@ If you found this repository useful, please consider citing this work and also t
 ```
 
 ### TODOs
-- [ ] Accent classification training script
-- [ ] Accent classification inference script
-- [x] Better speaking rate estimation with long silence removal
-- [x] Better SNR estimation with other SNR models
-- [ ] Add more annotation categories
-- [ ] Multilingual speaking rate estimation
 
+- [ ] Nepali accent classification training script
+- [ ] Nepali accent classification inference script
+- [ ] Multilingual speaking rate estimation (generalise beyond Nepali)
+- [x] Nepali-aware speaking rate estimation (espeak-ng + Devanagari fallback)
+- [x] Dataset-specific bin edge computation (`compute_bin_edges_nepali.py`)
+- [x] Nepali-language LLM prompt templates
+- [ ] Add more Nepali annotation categories
 - [ ] (long term) Benchmark for best audio dataset format
 - [ ] (long term) Compatibility with streaming

@@ -1,22 +1,10 @@
-"""
-main_nepali.py — Nepali-adapted entry point for Data-Speech annotation.
 
-Changes from original main.py:
-  - Default text_column_name changed to "transcription" (common in Nepali datasets)
-  - Added --language flag (documents intent; rate.py handles Nepali phonemes internally)
-  - rate.py uses espeak-ng Nepali backend or Devanagari character fallback automatically
-  - Print statements label Nepali-specific steps for clarity
+# Changes from original main.py:
+#  - Default text_column_name changed to "transcription" (common in Nepali datasets)
+#  - Added --language flag (documents intent; rate.py handles Nepali phonemes internally)
+#  - rate.py uses espeak-ng Nepali backend or Devanagari character fallback automatically
+#  - Print statements label Nepali-specific steps for clarity
 
-Usage example (Colab / terminal):
-    python main_nepali.py "YOUR_HF_HANDLE/nepali-tts-dataset" \\
-      --configuration "default" \\
-      --text_column_name "transcription" \\
-      --audio_column_name "audio" \\
-      --cpu_num_workers 2 \\
-      --num_workers_per_gpu_for_pitch 2 \\
-      --rename_column \\
-      --repo_id "YOUR_HF_HANDLE/nepali-tts-tags"
-"""
 
 from datasets import load_dataset, Audio
 from multiprocess import set_start_method

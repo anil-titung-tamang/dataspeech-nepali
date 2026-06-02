@@ -26,9 +26,9 @@ from transformers import (
 
 logger = get_logger(__name__, log_level="INFO")
 
-# ---------------------------------------------------------------------------
+
 # Prompt templates — NEPALI (Devanagari)
-# ---------------------------------------------------------------------------
+
 
 # Standard multi-speaker Nepali prompt
 NEW_NEPALI_PROMPT = """तपाईंलाई एक व्यक्तिको भाषण नमुनासँग सम्बन्धित छवटा वर्णनात्मक कुञ्जी शब्दहरू दिइनेछन्। यी कुञ्जी शब्दहरूमा समावेश छन्:
@@ -72,9 +72,9 @@ NEW_NEPALI_SINGLE_SPEAKER_PROMPT = """तपाईंलाई [speaker_name] �
 कुञ्जी शब्दहरू: '[reverberation]', '[sdr_noise]', '[speech_monotony]', '[speaking_rate]' को लागि विवरण:
 """
 
-# ---------------------------------------------------------------------------
+
 # English fallback prompts (from upstream, kept verbatim)
-# ---------------------------------------------------------------------------
+
 
 NEW_PROMPT_EN = """You will be given six descriptive keywords related to an audio sample of a person's speech. These keywords include:
 
@@ -103,9 +103,8 @@ Create a concise description for [speaker_name]'s speech. Only return one descri
 For the keywords: '[reverberation]', '[sdr_noise]', '[speech_monotony]', '[speaking_rate]', the corresponding description is:
 """
 
-# ---------------------------------------------------------------------------
 # Dataclass arguments
-# ---------------------------------------------------------------------------
+
 
 @dataclass
 class ModelArguments:
@@ -165,9 +164,9 @@ class DataArguments:
             raise ValueError("Specify --hub_dataset_id when using --push_to_hub.")
 
 
-# ---------------------------------------------------------------------------
+
 # Helpers (unchanged from upstream)
-# ---------------------------------------------------------------------------
+
 
 def get_quantization_config(model_args):
     if model_args.load_in_4bit:
@@ -251,9 +250,9 @@ class DataCollatorWithPadding:
         )
 
 
-# ---------------------------------------------------------------------------
+
 # Main
-# ---------------------------------------------------------------------------
+
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataArguments))
