@@ -1,7 +1,7 @@
 set -euo pipefail
 
 
-HF_HANDLE="YOUR_HF_HANDLE"
+HF_HANDLE="Titung" # your HuggingFace username
 DATASET_NAME="${HF_HANDLE}/cc100-nepali-tts-10k"   # your raw Nepali dataset on HF Hub
 TAGS_REPO="${HF_HANDLE}/nepali-tts-tags"          # where to push annotated tags
 TAGGED_REPO="${HF_HANDLE}/nepali-tts-tagged"      # where to push final descriptions

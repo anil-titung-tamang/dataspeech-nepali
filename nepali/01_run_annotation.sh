@@ -5,11 +5,11 @@
 
 cd ../../  # run from dataspeech root
 
-python main_nepali.py "YOUR_HF_HANDLE/nepali-tts-dataset" \
+python main_nepali.py "Titung/cc100-nepali-tts-10k" \
   --configuration "default" \
-  --text_column_name "transcription" \
+  --text_column_name "text" \
   --audio_column_name "audio" \
   --cpu_num_workers 2 \
   --num_workers_per_gpu_for_pitch 2 \
   --rename_column \
-  --repo_id "YOUR_HF_HANDLE/nepali-tts-tags"
+  --repo_id "Titung/nepali-tts-tags"
