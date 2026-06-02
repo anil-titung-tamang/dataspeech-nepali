@@ -1,31 +1,11 @@
-"""
-dataspeech/cpu_enrichments/rate.py  — Nepali-adapted version
-=============================================================
-Drop-in replacement for the upstream English rate.py.
-
-Strategy (in priority order):
-  1. espeak-ng with the Nepali backend ('ne') via subprocess — most accurate.
-  2. Pure-Python Devanagari syllable counting — fast, zero-dependency fallback.
-
-Both paths produce a `phonemes` string whose *length* (character count) is used
-as the numerator for speaking_rate = phonemes / audio_duration, matching the
-upstream API exactly so all downstream scripts (metadata_to_text.py, etc.) work
-unchanged.
-
-Install requirement for path 1:
-    sudo apt-get install espeak-ng          # and the Nepali data package
-    pip install phonemizer                  # Python wrapper (optional, we use subprocess)
-
-If espeak-ng is unavailable the code silently falls back to path 2 — no crash.
-"""
 
 import re
 import subprocess
 import unicodedata
 
-# ---------------------------------------------------------------------------
+
 # Devanagari syllable-counting fallback
-# ---------------------------------------------------------------------------
+
 # Nepali is written in Devanagari. Each syllable is roughly one vowel nucleus.
 # We count:
 #   - Independent vowels (U+0904..U+0914, U+0960..U+0961)
@@ -46,10 +26,7 @@ _HALANT = "\u094D"  # virama — suppresses inherent vowel
 
 
 def _devanagari_syllables(text: str) -> str:
-    """
-    Return a proxy 'phoneme' string for Devanagari text.
-    Length of the returned string ≈ syllable count.
-    """
+   
     syllables = []
     chars = list(text)
     i = 0
@@ -73,9 +50,9 @@ def _devanagari_syllables(text: str) -> str:
     return "".join(syllables) if syllables else text  # never return empty
 
 
-# ---------------------------------------------------------------------------
+
 # espeak-ng backend
-# ---------------------------------------------------------------------------
+
 _ESPEAK_AVAILABLE: bool | None = None  # cached after first check
 
 
@@ -96,10 +73,10 @@ def _check_espeak() -> bool:
 
 
 def _espeak_phonemize(text: str, lang: str = "ne") -> str:
-    """
-    Call espeak-ng and return IPA string.
-    Returns empty string on failure so caller can fall back.
-    """
+   
+#    Call espeak-ng and return IPA string.
+#    Returns empty string on failure so caller can fall back.
+
     try:
         result = subprocess.run(
             ["espeak-ng", "-v", lang, "--ipa", "-q", "--", text],
@@ -118,9 +95,8 @@ def _espeak_phonemize(text: str, lang: str = "ne") -> str:
     return ""
 
 
-# ---------------------------------------------------------------------------
+
 # Public API (matches upstream rate.py exactly)
-# ---------------------------------------------------------------------------
 
 def _phonemize(text: str) -> str:
     """Return a phoneme/syllable string for the given Nepali text."""
@@ -133,10 +109,7 @@ def _phonemize(text: str) -> str:
 
 
 def rate_apply(batch, rank=None, audio_column_name="audio", text_column_name="text"):
-    """
-    Compute speaking_rate and phonemes for a batch.
-    API is identical to the upstream English rate.py so all callers work unchanged.
-    """
+
     if isinstance(batch[text_column_name], list):
         speaking_rates = []
         phonemes_list = []
