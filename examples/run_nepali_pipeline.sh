@@ -1,17 +1,8 @@
-#!/usr/bin/env bash
-# examples/run_nepali_pipeline.sh
-# ============================================================
-# Full end-to-end Nepali dataspeech pipeline.
-# Edit the variables in Section 0 before running.
-# ============================================================
-
 set -euo pipefail
 
-# ============================================================
-# 0. Configuration — edit these
-# ============================================================
+
 HF_HANDLE="YOUR_HF_HANDLE"
-DATASET_NAME="${HF_HANDLE}/nepali-tts-dataset"   # your raw Nepali dataset on HF Hub
+DATASET_NAME="${HF_HANDLE}/cc100-nepali-tts-10k"   # your raw Nepali dataset on HF Hub
 TAGS_REPO="${HF_HANDLE}/nepali-tts-tags"          # where to push annotated tags
 TAGGED_REPO="${HF_HANDLE}/nepali-tts-tagged"      # where to push final descriptions
 
@@ -31,10 +22,10 @@ echo "  Dataset : ${DATASET_NAME}"
 echo "  GPUs    : ${GPU_COUNT}"
 echo "==========================================="
 
-# ============================================================
-# Step 0: Install espeak-ng Nepali support (run once)
-# ============================================================
-echo ""
+
+# Install espeak-ng Nepali support (run once)
+
+
 echo "[Step 0] Checking espeak-ng..."
 if ! command -v espeak-ng &>/dev/null; then
     echo "  Installing espeak-ng..."
@@ -49,10 +40,10 @@ else
     echo "  WARNING: Nepali voice not found. Falling back to Devanagari syllable count."
 fi
 
-# ============================================================
-# Step 1: Annotate with acoustic features
-# ============================================================
-echo ""
+
+# Annotate with acoustic features
+
+
 echo "[Step 1] Annotating acoustic features..."
 python main_nepali.py "${DATASET_NAME}" \
     --configuration "default" \
@@ -63,10 +54,10 @@ python main_nepali.py "${DATASET_NAME}" \
     --repo_id "${TAGS_REPO}" \
     --apply_squim_quality_estimation
 
-# ============================================================
-# Step 2: Compute Nepali-calibrated bin edges from YOUR data
-# ============================================================
-echo ""
+
+# Compute Nepali-calibrated bin edges from YOUR data
+
+
 echo "[Step 2] Computing Nepali bin edges from annotated dataset..."
 python scripts/compute_bin_edges_nepali.py "${TAGS_REPO}" \
     --configuration "default" \
@@ -75,10 +66,9 @@ python scripts/compute_bin_edges_nepali.py "${TAGS_REPO}" \
     --n_bins 7 \
     --cpu_num_workers "${CPU_WORKERS}"
 
-# ============================================================
-# Step 3: Map continuous tags → text keyword bins
-# ============================================================
-echo ""
+
+# Map continuous tags → text keyword bins
+
 echo "[Step 3] Mapping continuous annotations to text bins..."
 python ./scripts/metadata_to_text.py "${TAGS_REPO}" \
     --repo_id "${TAGS_REPO}" \
@@ -90,10 +80,10 @@ python ./scripts/metadata_to_text.py "${TAGS_REPO}" \
     --avoid_pitch_computation \
     --apply_squim_quality_estimation
 
-# ============================================================
-# Step 4: Generate Nepali natural-language descriptions
-# ============================================================
-echo ""
+
+# Generate Nepali natural-language descriptions
+
+
 echo "[Step 4] Generating Nepali text descriptions with LLM..."
 
 if [ "${GPU_COUNT}" -ge 2 ]; then
@@ -117,7 +107,7 @@ ${LAUNCH_CMD} scripts/run_prompt_creation_nepali.py \
     --preprocessing_num_workers "${CPU_WORKERS}" \
     --dataloader_num_workers "${CPU_WORKERS}"
 
-echo ""
+
 echo "==========================================="
 echo " Pipeline complete!"
 echo "  Tags repo    : https://huggingface.co/datasets/${TAGS_REPO}"
