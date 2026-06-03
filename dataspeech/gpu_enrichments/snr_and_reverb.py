@@ -1,7 +1,10 @@
+import torch
+import torch.torch_version
+torch.serialization.add_safe_globals([torch.torch_version.TorchVersion])
+
 from pyannote.audio import Model
 from pathlib import Path
 from brouhaha.pipeline import RegressiveActivityDetectionPipeline
-import torch 
 from huggingface_hub import hf_hub_download
 import numpy as np
 
@@ -21,7 +24,7 @@ def snr_apply(batch, rank=None, audio_column_name="audio", batch_size=32):
         # move to device and create pipeline here because the pipeline moves to the first GPU it finds anyway
         model.to(device)
 
-    pipeline = RegressiveActivityDetectionPipeline(segmentation=model, batch_size = batch_size)
+    pipeline = RegressiveActivityDetectionPipeline(segmentation=model, batch_size=batch_size)
     if rank:
         pipeline.to(torch.device(device))
     
@@ -40,7 +43,7 @@ def snr_apply(batch, rank=None, audio_column_name="audio", batch_size=32):
                 start = int(segment.start * ratio)
                 end = int(segment.end * ratio)
                 mask[start:end] = True
-            mask =  (~((res["snr"] == 0.0) & (res["c50"] == 0.0)) & mask)
+            mask = (~((res["snr"] == 0.0) & (res["c50"] == 0.0)) & mask)
 
             vad_duration = sum(map(lambda x: x[0].duration, res["annotation"].itertracks()))
             
@@ -62,7 +65,7 @@ def snr_apply(batch, rank=None, audio_column_name="audio", batch_size=32):
             start = int(segment.start * ratio)
             end = int(segment.end * ratio)
             mask[start:end] = True
-        mask =  (~((res["snr"] == 0.0) & (res["c50"] == 0.0)) & mask)
+        mask = (~((res["snr"] == 0.0) & (res["c50"] == 0.0)) & mask)
 
         vad_duration = sum(map(lambda x: x[0].duration, res["annotation"].itertracks()))     
         
